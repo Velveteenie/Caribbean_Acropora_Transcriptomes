@@ -1,0 +1,332 @@
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————Hybrid
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+#### DE NOVO TRANSCRIPTOME ASSEMBLY FOR THE HYBRID CARIBBEAN FUSED STAGHORN CORAL, ACROPORA PROLIFERA ####
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
+
+##########
+
+#!/bin/bash
+
+#SBATCH —-job-name          
+#SBATCH —-mem=50gm     
+#SBATCH —-nodes=1             
+#SBATCH —-ntasks=20             
+#SBATCH —-time=48:00:00       
+
+############
+
+## Concatenate R1 and R2 reads
+cat *_R2_001.fastq.gz > HybridR2.fastq
+cat *_R1_001.fastq.gz > HybridR1.fastq
+
+## Check quality of reads using fastqc
+## kmer correction
+
+perl /storage/home/cco38/work/miniconda3/bin/run_rcorrector.pl -t 12 \
+-1 /gpfs/group/ibb3/default/UTGSAF_Hybrid/217/217Hybrid/RawHybrid/217HybridR1.fastq.gz \
+-2 /gpfs/group/ibb3/default/UTGSAF_Hybrid/217/217Hybrid/RawHybrid/217HybridR2.fastq.gz
+
+
+## Discard read pairs for which one of the reads is unfixable according to Rcorrector, remove cor tag from headers, makes a file starting with unfixrm_
+
+FilterUncorrectabledPEfastq.py -1 217HybridR1.cor.fq.gz -2 217HybridR2.cor.fq.gz -s sample.log
+
+RemoveOverrepSeq.py \
+-1 unfixrm_217HybridR1.cor.fq -2 unfixrm_217HybridR2.cor.fq -fql /gpfs/group/ibb3/default/UTGSAF_Hybrid/217/217Hybrid/RawHybrid/FastQC/217HybridR1_fastqc/R1fastqc_data.txt \
+-fqr /gpfs/group/ibb3/default/UTGSAF_Hybrid/217/217Hybrid/RawHybrid/FastQC/217HybridR2_fastqc/R2fastqc_data.txt
+
+## De novo assembly using TRINITY 2.2.0
+Trinity --seqType fq --max_memory 600G --left rmoverrep_unfixrm_217HybridR1.cor.fq --right rmoverrep_unfixrm_217HybridR2.cor.fq --CPU 6
+
+## Quality assessment
+
+perl TrinityStats.pl /storage/home/cco38/scratch/Hybrid/trinity_out_dir/index/Trinity.fasta \
+> /storage/home/cco38/scratch/Hybrid/trinity_out_dir/index/Trinity_assembly.metrics
+
+perl filter_low_expr_transcripts.pl --matrix Trinity_trans.TPM.not_cross_norm --transcripts Trinity.fasta --trinity_mode --min_expr_any 1 --highest_iso_only > LowEX.txt
+
+## Get mapping rate
+
+bowtie2-build Trinity.fasta Trinity.fasta
+bowtie2 -x /storage/home/cco38/scratch/Hybrid/trinity_out_dir/index/Trinity.fasta \
+-1 rmoverrep_unfixrm_217HybridR1.cor.fq -2 rmoverrep_unfixrm_217HybridR2.cor.fq -S HybridTrin.sam --no-hd --no-sq --no-unal -k 5
+
+## Final stats
+
+seq_stats.pl Osborne_Hybrid_transcriptome_unaltered.fasta
+
+Osborne_Hybrid_transcriptome_unaltered.fasta
+-------------------------
+237431 sequences.
+1058 average length.
+39605 maximum length.
+201 minimum length.
+N50 = 1844
+251.3 Mb altogether (251265788 bp).
+0 ambiguous Mb. (0 bp, 0%)
+0 Mb of Ns. (0 bp, 0%)
+-------------------------
+
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+#### FILTERING CONTAMINATION AND SYMBIONT READS FROM ACROPORA PROLIFERA TRANSCRIPTOME ASSEMBLY ####
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
+## Remove small contigs from assembly (> 400bp) as these likely will not have any significant matches. 
+## Using scripts from Eli Meyer, Carly Kenkel, Sheila Kitchen, Misha Matz
+
+removesmalls.pl 400 Osborne_Hybrid_transcriptome_unaltered.fasta > OsborneHybrid_L400.fasta
+
+
+OsborneApro_L400.fasta
+-------------------------
+149616 sequences.
+1515 average length.
+39605 maximum length.
+400 minimum length.
+N50 = 2052
+226.7 Mb altogether (226725954 bp).
+0 ambiguous Mb. (0 bp, 0%)
+0 Mb of Ns. (0 bp, 0%)
+-------------------------
+
+## Using Kitchen et al. Acropora Hybrid genome to identify most likely origin of transcriptome sequences. To identify symbiont reads, transcriptome is compared to symbiont clades ABC protein DB.
+
+## Remove headers (i.e. “>TRINITY_DN88449_c0_g1_i1 len=405 path=[383:0-213 384:214-404] [-1, 383, 384, -2]” becomes ”>TRINITY_DN88449_c0_g1_i1”), using sed -e 's/>* .*$//'
+
+## make blast database, and split transcriptome into 10 chunks to speed up blasting
+
+makeblastdb -in Aprolifera_protein_truncated.fa -dbtype prot
+makeblastdb -in symPep.fa -dbtype prot
+
+perl splitFasta.pl OsborneApal_400T.fasta 10
+
+## using CompareContamSeq.pl from Kenkel/Meyer
+
+for F in *.fasta; do
+perl CompareContamSeq.pl $F 45 /storage/group/ibb3/default/CCOsborne/UTGSAF_Hybrid/217/Complete/HybridTranscriptome/O2023/Aprolifera_protein_truncated.fa /storage/group/ibb3/default/CCOsborne/UTGSAF_Hybrid/217/Complete/HybridTranscriptome/O2023/symPep.fa
+
+## Renamed outputs: Osborne2023_Aprolifera_transcriptome.fasta; Osborne2023_AproliferaSYM_transcriptome.fasta; Apro_NoMatches_transcriptome2023.fasta
+## BBMAP stats
+
+----------------------------------------------------------------------------------------------------
+APRO HOST GC
+
+A	C	G	T	N	IUPAC   Other   GC	GC_stdev
+0.2963  0.2038  0.2060  0.2938  0.0000  0.0000  0.0000  0.4098  0.0329
+
+Main genome scaffold total:             51239
+Main genome contig total:               51239
+Main genome scaffold sequence total:    108.486 MB
+Main genome contig sequence total:      108.486 MB      0.000% gap
+Main genome scaffold N/L50:             11355/2.99 KB
+Main genome contig N/L50:               11355/2.99 KB
+Main genome scaffold N/L90:             34841/1.02 KB
+Main genome contig N/L90:               34841/1.02 KB
+Max scaffold length:                    39.605 KB
+Max contig length:                      39.605 KB
+Number of scaffolds > 50 KB:            0
+% main genome in scaffolds > 50 KB:     0.00%
+
+
+Minimum         Number          Number          Total           Total           Scaffold
+Scaffold        of              of              Scaffold        Contig          Contig
+Length          Scaffolds       Contigs         Length          Length          Coverage
+--------        --------------  --------------  --------------  --------------  --------
+    All                 51,239          51,239     108,485,695     108,485,695   100.00%
+    250                 51,239          51,239     108,485,695     108,485,695   100.00%
+    500                 47,184          47,184     106,671,769     106,671,769   100.00%
+   1 KB                 35,201          35,201      98,016,078      98,016,078   100.00%
+ 2.5 KB                 15,173          15,173      64,705,608      64,705,608   100.00%
+   5 KB                  3,469           3,469      24,362,576      24,362,576   100.00%
+  10 KB                    302             302       3,882,791       3,882,791   100.00%
+  25 KB                      6               6         189,754         189,754   100.00%
+
+
+*APRO HOST gVOLANTE https://gvolante.riken.jp/ completeness assessment* 
+
+Summary of the Submitted Job:
+		Job ID: 202309270527-9XYH5YKXQC574799
+		Project name: Aproosborne
+		Fasta file: Osborne2023_Aprolifera_transcriptome.fasta.gz
+		Cut-off length for sequence statistics and composition: 1
+		Sequence type: trans
+		Selected program: BUSCO_v5
+		Selected ortholog set: Metazoa
+
+Completeness Assessment Results:    
+	Total # of core genes queried:    954
+	# of core genes detected
+		Complete:    867 (90.88%)
+		Complete + Partial:    888 (93.08%)
+	# of missing core genes:    66 (6.92%)
+	Average # of orthologs per core genes:    1.97
+	% of detected core genes that have more than 1 ortholog:    43.02
+	Scores in BUSCO format:    C:90.9%[S:51.8%,D:39.1%],F:2.2%,M:6.9%,n:954
+
+Length Statistics and Composition:
+	# of sequences:    51239
+	Total length (nt):    108485695
+	Longest sequence (nt):    39605
+	Shortest sequence (nt):    400
+	Mean sequence length (nt):    2117
+	Median sequence length (nt):    1595
+	N50 sequence length (nt):    2990
+	L50 sequence count:    11354
+	# of sequences >   1K (nt):    35181 (68.7% of total number)
+	# of sequences >  10K (nt):    302 (0.6% of total number)
+	# of sequences > 100K (nt):    0 (0.0% of total number)
+	# of sequences >   1M (nt):    0 (0.0% of total number)
+	# of sequences >  10M (nt):    0 (0.0% of total number)
+	Base composition (%):    A:29.63, T:29.38, G:20.60, C:20.38, N:0.00, Other:0.00
+	GC-content (%):    40.98
+	# of sequences containing non-ACGTN (nt):    0
+----------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------
+APRO SYM
+
+A	C	G	T	N	IUPAC   Other   GC	GC_stdev
+0.2118  0.2871  0.2891  0.2121  0.0000  0.0000  0.0000  0.5762  0.0379
+
+Main genome scaffold total:             61115
+Main genome contig total:               61115
+Main genome scaffold sequence total:    90.063 MB
+Main genome contig sequence total:      90.063 MB       0.000% gap
+Main genome scaffold N/L50:             16472/1.773 KB
+Main genome contig N/L50:               16472/1.773 KB
+Main genome scaffold N/L90:             45807/787
+Main genome contig N/L90:               45807/787
+Max scaffold length:                    17.042 KB
+Max contig length:                      17.042 KB
+Number of scaffolds > 50 KB:            0
+% main genome in scaffolds > 50 KB:     0.00%
+
+
+Minimum         Number          Number          Total           Total           Scaffold
+Scaffold        of              of              Scaffold        Contig          Contig
+Length          Scaffolds       Contigs         Length          Length          Coverage
+--------        --------------  --------------  --------------  --------------  --------
+    All                 61,115          61,115      90,062,833      90,062,833   100.00%
+    250                 61,115          61,115      90,062,833      90,062,833   100.00%
+    500                 56,847          56,847      88,150,277      88,150,277   100.00%
+   1 KB                 38,036          38,036      74,149,799      74,149,799   100.00%
+ 2.5 KB                  6,980           6,980      25,373,783      25,373,783   100.00%
+   5 KB                    840             840       5,559,751       5,559,751   100.00%
+  10 KB                     46              46         523,102         523,102   100.00%
+
+*APRO SYM gVOLANTE completeness assessment
+
+Summary of the Submitted Job:
+		Project name: AProosborneSYM
+		Fasta file: Osborne2023_AproliferaSYM_transcriptome.fasta.gz
+		Cut-off length for sequence statistics and composition: 1
+		Sequence type: trans
+		Selected program: BUSCO_v5
+		Selected ortholog set: Eukaryota
+
+Completeness Assessment Results:    
+	Total # of core genes queried:    255
+	# of core genes detected
+		Complete:    181 (70.98%)
+		Complete + Partial:    206 (80.78%)
+	# of missing core genes:    49 (19.22%)
+	Average # of orthologs per core genes:    1.19
+	% of detected core genes that have more than 1 ortholog:    14.36
+	Scores in BUSCO format:    C:71.0%[S:60.8%,D:10.2%],F:9.8%,M:19.2%
+
+Length Statistics and Composition:
+	# of sequences:    61115
+	Total length (nt):    90062833
+	Longest sequence (nt):    17042
+	Shortest sequence (nt):    400
+	Mean sequence length (nt):    1474
+	Median sequence length (nt):    1221
+	N50 sequence length (nt):    1773
+	L50 sequence count:    16463
+	# of sequences >   1K (nt):    38005 (62.2% of total number)
+	# of sequences >  10K (nt):    46 (0.1% of total number)
+	# of sequences > 100K (nt):    0 (0.0% of total number)
+	# of sequences >   1M (nt):    0 (0.0% of total number)
+	# of sequences >  10M (nt):    0 (0.0% of total number)
+	Base composition (%):    A:21.18, T:21.21, G:28.91, C:28.71, N:0.00, Other:0.00
+	GC-content (%):    57.61
+	# of sequences containing non-ACGTN (nt):    0
+
+----------------------------------------------------------------------------------------------------
+
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+#### ANNOTATING FILTERED ACROPORA PROLIFERA TRANSCRIPTOME ASSEMBLY ####
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+—————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
+## get uniprot_swissprot KB database, and annotations; unzip using gunzip
+wget ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz
+wget ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/idmapping_selected.tab.gz
+
+## annotate with isogroups
+grep ">" Osborne2023_Aprolifera_transcriptome.fasta | perl -pe 's/>((TRINITY.+_g\d+)\S+)/$1\t$2/' > Osborne2023_Aprolifera_transcriptome_seq2iso.tab
+cat Osborne2023_Aprolifera_transcriptome.fasta | perl -pe 's/>((TRINITY.+_g\d+)\S+)/>$1 gene=$2/' > Osborne2023_Aprolifera_transcriptome_iso.fasta
+
+cat Osborne2023_Aprolifera_transcriptome_seq2iso.tab | cut -f 2 | sort -u | wc -l
+## 25261 isogroups containing 46132 contigs
+
+## split transcriptome
+splitFasta.pl Osborne2023_Aprolifera_transcriptome.fasta 48 
+
+## blast to uniprot
+for F in *.fasta; do
+blastx -query $F -db  /storage/group/ibb3/default/CCOsborne/UTGSAF_Hybrid/217/Complete/HybridTranscriptome/O2023/compare/final/uniprot_sprot.fasta -evalue 0.0001 -num_threads 1 -num_descriptions 5 -num_alignments 5 -out ${F}.br 
+done
+
+## combine blast results
+cat subset*Apro*br > UniProt_blast_Apro.br
+
+# Gene names:
+
+getGeneNameFromUniProtKB.pl blast= UniProt_blast_Apro.br prefix=Osborne2023_Aprolifera fastaQuery= Osborne2023_Aprolifera_transcriptome_iso.fasta db=./uniprot_sprot.fasta
+
+# Output = Osborne2023_Aprolifera_iso2gene.tab 
+# 26659 of 51239 isogroups have gene annotation in Uniprot = 52% 
+
+# GO annotations:
+
+getGOfromUniProtKB.pl blast= UniProt_blast_Apro.br prefix= Osborne2023_Aprolifera fastaQuery= Osborne2023_Aprolifera_transcriptome_iso.fasta
+cat Osborne2023_Aprolifera_iso2go.tab | awk '{if ($2!="") print }' > Osborne2023_Aprolifera_iso2go.tab 
+
+# Output = Osborne2023_Aprolifera_iso2go.tab 
+# 26947 of 51239 isogroups have gene annotation in Uniprot = 53%
+
+# KEGG annotations:
+
+# selecting the longest contig per isogroup:
+fasta2SBH_2.pl Osborne2023_Aprolifera_transcriptome_iso.fasta > Apro_4kegg.fasta 
+
+# submit to ( http://www.genome.jp/kegg/kaas/ ); select SBH algorithm, upload nucleotide query, select representative genes for Acroporids - Adf, Amil
+# download the 'text' output from KAAS, select only the lines with non-missing annotation:
+
+cat Osborne2023_Aprolifera_iso2kegg.ko | awk '{if ($2!="") print }' > Osborne2023_Aprolifera_iso2kegg.tab
+
+#how many unique KEGG annotations?
+cat Osborne2023_Aprolifera_iso2kegg.tab | cut -f 2 | sort -u | wc -l
+# 9217 unique KEGG annotations
+
+# Coding sequences and downstream annotations: 
+
+## extract coding sequences and corresponding protein translations, which then will be uploaded to eggNOG (http://eggnog-mapper.embl.de/)
+perl CDS_extractor_v2.pl Osborne2023_Aprolifera_transcriptome_iso.fasta UniProt_blast_Apro.br allhits bridgegaps ## M. Matz perl code; upload resulting iso_PRO.fasta to eggNOG.
+
+perl contiguity.pl hits=Osborne2023_Aprolifera_transcriptome_iso_hits.tab threshold=0.75
+
+# contiguity at 0.75 threshold: 0.48
+
+# KOG annotations:
+
+## using annotation file from emapper
+awk -F "\t" 'BEGIN {OFS="\t" }{print $1,$7 }' Osborne2023_Aprolifera_annotations.annotations | grep -Ev "[,#S]" > Apro_gene2kogClass1.tab
+awk 'BEGIN {FS=OFS="\t"} NR==FNR {a[$1] = $2;next} {print $1,a[$2]}' kog_classes.txt Apro_gene2kogClass1.tab > Osborne2023_Aprolifera_gene2kogClass.tab
+cat Osborne2023_Aprolifera_gene2kogClass.tab | awk '{if ($2!="") print }' > Osborne2023_Aprolifera_gene2kogClass.tab
