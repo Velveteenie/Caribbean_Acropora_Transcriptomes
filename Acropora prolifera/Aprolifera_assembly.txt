@@ -76,7 +76,7 @@ N50 = 1844
 —————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
 
 ## Remove small contigs from assembly (> 400bp) as these likely will not have any significant matches. 
-## Using scripts from Eli Meyer, Carly Kenkel, Sheila Kitchen, Misha Matz
+## Scripts from Eli Meyer, Carly Kenkel, Sheila Kitchen, Misha Matz
 
 removesmalls.pl 400 Osborne_Hybrid_transcriptome_unaltered.fasta > OsborneHybrid_L400.fasta
 
