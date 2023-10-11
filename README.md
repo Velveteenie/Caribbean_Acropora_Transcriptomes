@@ -1,6 +1,6 @@
 # Caribbean_Acropora_Transcriptomes
 
-[![DOI](https://zenodo.org/badge/8419618.svg)](https://zenodo.org/badge/latestdoi/8419618)
+[![DOI](https://zenodo.org/badge/8419618.svg)](https://zenodo.org/badge/8419618)
 
 
 Please cite with authors Osborne, C. C., Baums, I. B
